@@ -1,9 +1,9 @@
 # =============================================
 # VimaClip - Motor de Vídeo
-# Serviço de Smart Director Ultra (v8.0 - MAGISTER)
+# Serviço de Smart Director Ultra (v21.1 - PURGE BONECO EDITION)
 # =============================================
-# Arquitetura: Full-Frame Audit + Edge Recovery + Multi-Focus Stability
-# Foco: Zero Cortes Laterais, Zero Bonecos, Split-Screen Dinâmico
+# Foco: Meio Termo + Extermínio Total do Boneco
+# Arquitetura: Ultra-Vitality Filter + Dynamic Harmony + Zero-Boneco Deadzone
 # =============================================
 
 import os
@@ -19,12 +19,13 @@ from typing import Optional, List, Dict, Any
 # Configura o logger
 logger = logging.getLogger(__name__)
 
-# MediaPipe Ultra-Sense
+# Inicializa o Face Mesh
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=True, 
     max_num_faces=5,
-    min_detection_confidence=0.4 # Aumentado para pegar rostos de perfil
+    min_detection_confidence=0.35, 
+    min_tracking_confidence=0.5
 )
 
 # Constantes de Enquadramento
@@ -34,7 +35,7 @@ ASPECT_RATIOS = {
     "square": {"width_ratio": 1, "height_ratio": 1},
 }
 
-# Índices do Face Mesh para lábios
+# Índices para variância labial
 LIP_INDEXES = [
     61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 185, 40, 39, 37, 0, 267, 269, 270, 409, 415, 310, 311, 312, 13, 82, 81, 42, 183, 78
 ]
@@ -49,11 +50,10 @@ def apply_smart_crop(
     subtitle_style: str = "classic"
 ) -> str:
     """
-    Motor Smart Director v8.0 MAGISTER:
-    - Extração via FFmpeg garante visão total.
-    - Foco Lateral (Edge Recovery): Se um rosto estiver na borda, ele ganha prioridade.
-    - Low-Threshold Trigger: Dispara Split-Screen com qualquer cena aberta estável.
-    - Intelligent Padding: Garante 10% de margem livre nas bordas laterais.
+    Motor Smart Director v21.1 PURGE BONECO:
+    - Ultra-Vitality Filter: Threshold labial em 0.0042 (bloqueio total de estáticos).
+    - Zero-Boneco Deadzone: Exclusão cirúrgica do centro (onde o boneco mora).
+    - Harmonic Balance: Equilíbrio ponderado 65% Host para o "Meio Termo".
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Vídeo não encontrado: {video_path}")
@@ -69,46 +69,47 @@ def apply_smart_crop(
     os.makedirs(temp_frames_dir, exist_ok=True)
 
     try:
-        logger.info("[SMART-DIRECTOR v8.0] Iniciando Auditoria de Bordas...")
-        _extract_frames_ffmpeg_v8(video_path, temp_frames_dir)
+        # 1. Extração Auditagem Visual
+        logger.info(f"[SMART-DIRECTOR v21.1] Executando Purge do Boneco: {base_name}")
+        _extract_frames_ffmpeg_v21(video_path, temp_frames_dir)
 
-        logger.info("[SMART-DIRECTOR v8.0] Calculando Timeline Magister...")
-        directors_log = _analyze_frames_v8(temp_frames_dir)
+        # 2. Detecção e Extermínio de Estáticos
+        tracking_data = _analyze_purge_v21(temp_frames_dir)
         
-        if not directors_log:
-            logger.warning("[SMART-DIRECTOR] Escuridão total. Usando centro 0.5.")
-            final_center_x = 0.5
-            multi_human_ratio = 0
+        if not tracking_data:
+            logger.warning("[SMART-DIRECTOR] Escuridão Total. Alpha 0.35.")
+            final_center_x = 0.35
+            has_split_tension = False
         else:
-            # Seleção: Privilegia quem está falando ou quem está nas bordas (Locutor 1/2 lateralizados)
-            active_xs = [d["center_x"] for d in directors_log if d["priority"] > 50]
-            if active_xs:
-                final_center_x = float(np.median(active_xs))
-            else:
-                final_center_x = float(np.median([d["center_x"] for d in directors_log]))
+            all_centers = [d["center_x"] for d in tracking_data]
+            final_center_x = float(np.median(all_centers))
             
-            multi_human_ratio = sum(1 for d in directors_log if d["count"] >= 2) / len(directors_log)
+            has_split_tension = any(d["has_conflict"] for d in tracking_data)
+            multi_presence = sum(1 for d in tracking_data if d["face_count"] >= 2) / len(tracking_data)
 
-        # STICKY CENTER (Zona ultra-sensível 3%)
-        if abs(final_center_x - 0.5) < 0.03:
-            final_center_x = 0.5
+            if layout == "auto" and format in ["vertical", "square"] and (has_split_tension or multi_presence > 0.05):
+                logger.info("[SMART-DIRECTOR] Ativando SPLIT PURGE (Dual Human Only).")
+                targets = _get_split_targets_v21(tracking_data)
+                return _execute_stacked_crop_v21(video_path, output_path, targets, iw, ih, burn_subtitles, srt_path)
 
-        # 1. DISPARO DE SPLIT-SCREEN (MAGISTER THRESHOLD: 3%)
-        if layout == "auto" and format in ["vertical", "square"] and multi_human_ratio > 0.03:
-            logger.info(f"[SMART-DIRECTOR] Tomada Multi-Participante Detectada ({multi_human_ratio:.1%}).")
-            targets_split = _get_split_targets_v8(directors_log)
-            return _execute_stacked_crop_v8(video_path, output_path, targets_split, iw, ih, format, burn_subtitles, srt_path)
-
-        # 2. GERAÇÃO SINGLE
+        # 4. Enquadramento Single ALPHA (O Meio Termo)
         target_width = int(ih * rw / rh)
         target_height = ih
         if target_width > iw:
             target_width = iw
             target_height = int(iw * rh / rw)
 
-        # PADDING INTELIGENTE: Puxa o centro para garantir que o rosto não suma
-        # Se o centro estiver muito na esquerda, garantimos o padding
+        # CÁLCULO DE CROP COM PADDING MILIMÉTRICO
         x_offset = int((final_center_x * iw) - (target_width / 2))
+        
+        # O MEIO TERMO: Compensação visual para o Host
+        if final_center_x > 0.50:
+            # Puxamos 15% para a esquerda se o Convidado estiver dominando
+            x_offset -= int(0.15 * iw)
+        elif final_center_x < 0.38:
+            # Se for Host sozinho, damos respiro de 10%
+            x_offset -= int(0.10 * iw)
+
         x_offset = max(0, min(x_offset, iw - target_width))
         y_offset = int((ih - target_height) / 2)
 
@@ -118,6 +119,7 @@ def apply_smart_crop(
 
         filter_v += f",scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(ih,iw),min(1080,ih),-2)'"
 
+        logger.info(f"[FFMPEG-PURGE] Success: x={x_offset}, center={final_center_x:.4f}")
         cmd = ["ffmpeg", "-i", video_path, "-vf", filter_v, "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-c:a", "copy", "-y", output_path]
         subprocess.run(cmd, capture_output=True, text=True, check=True)
         return output_path
@@ -126,13 +128,13 @@ def apply_smart_crop(
         if os.path.exists(temp_frames_dir):
             shutil.rmtree(temp_frames_dir)
 
-def _extract_frames_ffmpeg_v8(video_path: str, output_dir: str):
-    cmd = ["ffmpeg", "-i", video_path, "-vf", "fps=2", os.path.join(output_dir, "frame_%04d.jpg"), "-y"]
+def _extract_frames_ffmpeg_v21(video_path: str, output_dir: str):
+    cmd = ["ffmpeg", "-i", video_path, "-vf", "fps=3", os.path.join(output_dir, "frame_%04d.jpg"), "-y"]
     subprocess.run(cmd, capture_output=True, check=True)
 
-def _analyze_frames_v8(frames_dir: str) -> List[Dict[str, Any]]:
+def _analyze_purge_v21(frames_dir: str) -> List[Dict[str, Any]]:
     frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith(".jpg")])
-    log = []
+    tracking_log = []
     
     for f in frame_files:
         img_path = os.path.join(frames_dir, f)
@@ -142,73 +144,63 @@ def _analyze_frames_v8(frames_dir: str) -> List[Dict[str, Any]]:
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(img_rgb)
         
-        candidates = []
+        real_humans = []
         if results.multi_face_landmarks:
             for landmarks in results.multi_face_landmarks:
                 x_coords = [lm.x for lm in landmarks.landmark]
                 y_coords = [lm.y for lm in landmarks.landmark]
                 xmin, xmax = min(x_coords), max(x_coords)
                 ymin, ymax = min(y_coords), max(y_coords)
-                
                 cx, cy = (xmin + xmax) / 2, (ymin + ymax) / 2
-                area = (xmax - xmin) * (ymax - ymin)
                 
-                # RELEZA v8.0: Ignora bonecos e mesa
-                if cy > 0.60: continue
+                # ZONA ANTI-BONECO (Exclusão Cirúrgica do Eixo Z)
+                # 1. Filtro de Mesa
+                if cy > 0.60: continue 
+                # 2. Filtro de Centro Geométrico (Morte ao Boneco Estático)
+                if 0.45 < cx < 0.55 and cy > 0.40: continue 
                 
-                # Filtro de Central Baixo (Boneco no centro da mesa)
-                if 0.45 < cx < 0.55 and cy > 0.45: continue
+                # 3. ULTRA VITALITY (Threshold 0.0042)
+                lip_pts = [landmarks.landmark[i].y for i in LIP_INDEXES]
+                v_dist = max(lip_pts) - min(lip_pts)
                 
-                # Lips Tracking (Sensibilidade Extrema: 0.006)
-                lip_y = [landmarks.landmark[i].y for i in LIP_INDEXES]
-                lip_dist = max(lip_y) - min(lip_y)
-                is_speaking = lip_dist > 0.007
-                
-                # EDGE RECOVERY SCORE: Bônus para locutores lateralizados
-                # Se cx < 0.3 ou cx > 0.7, damos bônus de realeza lateral
-                edge_bonus = 30.0 if (cx < 0.35 or cx > 0.65) else 0.0
-                
-                pos_bonus = 1.0 - abs(cy - 0.30) # Linha dos olhos
-                score = (100.0 if is_speaking else 0.0) + (pos_bonus * 10.0) + edge_bonus + (area * 5.0)
-                
-                candidates.append({"x": cx, "score": score, "speaking": is_speaking})
+                if v_dist > 0.0042: # Só humanos reais se mexendo tanto
+                    real_humans.append(cx)
         
-        if candidates:
-            best = max(candidates, key=lambda x: x["score"])
-            log.append({
-                "center_x": best["x"], 
-                "priority": best["score"],
-                "speaking": best["speaking"],
-                "all_xs": sorted([c["x"] for c in candidates]),
-                "count": len(candidates)
+        if real_humans:
+            left_wing = [x for x in real_humans if x < 0.45]
+            right_wing = [x for x in real_humans if x > 0.55]
+            
+            # Cálculo Ponderado (Meio Termo)
+            if left_wing and right_wing:
+                h_x, g_x = float(np.median(left_wing)), float(np.median(right_wing))
+                center = (h_x * 0.70) + (g_x * 0.30) # Prioridade máxima ao Host
+            else:
+                center = float(np.median(real_humans))
+            
+            tracking_log.append({
+                "center_x": center,
+                "has_conflict": len(left_wing) > 0 and len(right_wing) > 0,
+                "face_count": len(real_humans)
             })
             
-    return log
+    return tracking_log
 
-def _get_split_targets_v8(log: List[Dict[str, Any]]) -> List[float]:
-    left, right = [], []
-    for d in log:
-        xs = d.get("all_xs", [])
-        if len(xs) >= 2:
-            left.append(xs[0])
-            right.append(xs[-1])
-        elif len(xs) == 1:
-            if xs[0] < 0.48: left.append(xs[0])
-            elif xs[0] > 0.52: right.append(xs[0])
-            
-    # Garantia de Enquadramento Lateral: se as listas estiverem vazias, forçar alvos de borda
-    if not left: left = [0.20] # Foco Locutor 1
-    if not right: right = [0.80] # Foco Locutor 2
-    return [float(np.median(left)), float(np.median(right))]
+def _get_split_targets_v21(log: List[Dict[str, Any]]) -> List[float]:
+    l_c = [d["center_x"] for d in log if d["center_x"] < 0.45]
+    r_c = [d["center_x"] for d in log if d["center_x"] > 0.55]
+    return [float(np.median(l_c)) if l_c else 0.30, float(np.median(r_c)) if r_c else 0.70]
 
-def _execute_stacked_crop_v8(video_path: str, output_path: str, targets: List[float], iw: int, ih: int, format: str, burn_subtitles: bool, srt_path: Optional[str]) -> str:
-    # Resolve 1 locutor sendo cortado: Janela Magnificada (1.3x)
-    t1_x, t2_x = int(targets[0] * iw), int(targets[1] * iw)
+def _execute_stacked_crop_v21(video_path: str, output_path: str, targets: List[float], iw: int, ih: int, burn_subtitles: bool, srt_path: Optional[str]) -> str:
     win_h = ih // 2
-    win_w = int(win_h * 9 / 7) # Janela mais larga para comportar corpos lateralizados
+    win_w = int(win_h * 9 / 4.5) 
     
-    off1_x = max(0, min(t1_x - (win_w // 2), iw - win_w))
-    off2_x = max(0, min(t2_x - (win_w // 2), iw - win_w))
+    off1_x = int((targets[0] * iw) - (win_w / 2))
+    if targets[0] < 0.38: off1_x -= int(0.12 * iw)
+    off1_x = max(0, min(off1_x, iw - win_w))
+    
+    off2_x = int((targets[1] * iw) - (win_w / 2))
+    if targets[1] > 0.62: off2_x += int(0.12 * iw)
+    off2_x = max(0, min(off2_x, iw - win_w))
     
     filter_complex = (
         f"[0:v]crop={win_w}:{win_h}:{off1_x}:0[top];"
@@ -222,7 +214,7 @@ def _execute_stacked_crop_v8(video_path: str, output_path: str, targets: List[fl
         filter_complex += f";{final_v_label}subtitles='{clean_sub}':force_style='FontSize=12'{final_v_label}"
         
     cmd = ["ffmpeg", "-i", video_path, "-filter_complex", filter_complex, "-map", f"{final_v_label}", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-c:a", "copy", "-y", output_path]
-    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    subprocess.run(cmd, capture_output=True, check=True)
     return output_path
 
 def _append_subtitle_filter(video_filter: str, srt_path: str) -> str:

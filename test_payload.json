@@ -1,0 +1,11 @@
+﻿{
+  "video_url": "https://www.youtube.com/watch?v=cJMvE4FQI6c",
+  "format": "vertical",
+  "layout": "single",
+  "segments": [
+    {
+      "start": "01:35",
+      "end": "01:59"
+    }
+  ]
+}
