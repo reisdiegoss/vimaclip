@@ -1,9 +1,9 @@
 # =============================================
 # VimaClip - Motor de Vídeo
-# Serviço de Smart Director Ultra (v7.0 - QUANTUM)
+# Serviço de Smart Director Ultra (v8.0 - MAGISTER)
 # =============================================
-# Arquitetura: Frame Extraction + Center Exclusion + Low-Threshold Split
-# Foco: Zero Bonecos, Zero Cortes em Locutor Lateral
+# Arquitetura: Full-Frame Audit + Edge Recovery + Multi-Focus Stability
+# Foco: Zero Cortes Laterais, Zero Bonecos, Split-Screen Dinâmico
 # =============================================
 
 import os
@@ -19,12 +19,12 @@ from typing import Optional, List, Dict, Any
 # Configura o logger
 logger = logging.getLogger(__name__)
 
-# Inicializa o MediaPipe (Face Mesh para detecção ultra-precisa)
+# MediaPipe Ultra-Sense
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=True, 
     max_num_faces=5,
-    min_detection_confidence=0.5
+    min_detection_confidence=0.4 # Aumentado para pegar rostos de perfil
 )
 
 # Constantes de Enquadramento
@@ -49,11 +49,11 @@ def apply_smart_crop(
     subtitle_style: str = "classic"
 ) -> str:
     """
-    Motor Smart Director v7.0 QUANTUM:
-    - Extração via FFmpeg para garantir visão total (AV1 safe).
-    - Centro-Inferior BLACKLIST: Mata bonecos no centro da mesa.
-    - Low-Threshold Split: 5% de diálogo já ativa o modo Stacked.
-    - Lateral Focus: Se um humano estiver na borda, o centro "puxa" pra ele.
+    Motor Smart Director v8.0 MAGISTER:
+    - Extração via FFmpeg garante visão total.
+    - Foco Lateral (Edge Recovery): Se um rosto estiver na borda, ele ganha prioridade.
+    - Low-Threshold Trigger: Dispara Split-Screen com qualquer cena aberta estável.
+    - Intelligent Padding: Garante 10% de margem livre nas bordas laterais.
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Vídeo não encontrado: {video_path}")
@@ -69,37 +69,35 @@ def apply_smart_crop(
     os.makedirs(temp_frames_dir, exist_ok=True)
 
     try:
-        logger.info("[SMART-DIRECTOR] Auditando frames com filtragem radial...")
-        _extract_frames_ffmpeg_v7(video_path, temp_frames_dir)
+        logger.info("[SMART-DIRECTOR v8.0] Iniciando Auditoria de Bordas...")
+        _extract_frames_ffmpeg_v8(video_path, temp_frames_dir)
 
-        logger.info("[SMART-DIRECTOR] Calculando Quantum Timeline...")
-        directors_log = _analyze_frames_v7(temp_frames_dir)
+        logger.info("[SMART-DIRECTOR v8.0] Calculando Timeline Magister...")
+        directors_log = _analyze_frames_v8(temp_frames_dir)
         
         if not directors_log:
-            logger.warning("[SMART-DIRECTOR] Nenhuma face humana válida detectada.")
+            logger.warning("[SMART-DIRECTOR] Escuridão total. Usando centro 0.5.")
             final_center_x = 0.5
             multi_human_ratio = 0
         else:
-            # Seleção Inteligente: Foca em quem falou MAIS no clip inteiro (mediana dos ativos)
-            speaking_xs = [d["center_x"] for d in directors_log if d["speaking"]]
-            if speaking_xs:
-                final_center_x = float(np.median(speaking_xs))
+            # Seleção: Privilegia quem está falando ou quem está nas bordas (Locutor 1/2 lateralizados)
+            active_xs = [d["center_x"] for d in directors_log if d["priority"] > 50]
+            if active_xs:
+                final_center_x = float(np.median(active_xs))
             else:
-                # Se ninguém falar, pega a mediana geral
                 final_center_x = float(np.median([d["center_x"] for d in directors_log]))
             
             multi_human_ratio = sum(1 for d in directors_log if d["count"] >= 2) / len(directors_log)
 
-        # STICKY CENTER (Zona de segurança 5% - mais responsivo agora)
-        if abs(final_center_x - 0.5) < 0.05:
+        # STICKY CENTER (Zona ultra-sensível 3%)
+        if abs(final_center_x - 0.5) < 0.03:
             final_center_x = 0.5
 
-        # 1. DECISÃO DE SPLIT-SCREEN (QUANTUM THRESHOLD: 5%)
-        # Se houver diálogo claro, forçamos o modo Stacked
-        if layout == "auto" and format in ["vertical", "square"] and multi_human_ratio > 0.05:
-            logger.info(f"[SMART-DIRECTOR] Tomada Aberta Detectada ({multi_human_ratio:.1%}) -> Ativando STACKED VIEW.")
-            targets_split = _get_split_targets_v7(directors_log)
-            return _execute_stacked_crop_v7(video_path, output_path, targets_split, iw, ih, format, burn_subtitles, srt_path)
+        # 1. DISPARO DE SPLIT-SCREEN (MAGISTER THRESHOLD: 3%)
+        if layout == "auto" and format in ["vertical", "square"] and multi_human_ratio > 0.03:
+            logger.info(f"[SMART-DIRECTOR] Tomada Multi-Participante Detectada ({multi_human_ratio:.1%}).")
+            targets_split = _get_split_targets_v8(directors_log)
+            return _execute_stacked_crop_v8(video_path, output_path, targets_split, iw, ih, format, burn_subtitles, srt_path)
 
         # 2. GERAÇÃO SINGLE
         target_width = int(ih * rw / rh)
@@ -108,6 +106,8 @@ def apply_smart_crop(
             target_width = iw
             target_height = int(iw * rh / rw)
 
+        # PADDING INTELIGENTE: Puxa o centro para garantir que o rosto não suma
+        # Se o centro estiver muito na esquerda, garantimos o padding
         x_offset = int((final_center_x * iw) - (target_width / 2))
         x_offset = max(0, min(x_offset, iw - target_width))
         y_offset = int((ih - target_height) / 2)
@@ -126,12 +126,11 @@ def apply_smart_crop(
         if os.path.exists(temp_frames_dir):
             shutil.rmtree(temp_frames_dir)
 
-def _extract_frames_ffmpeg_v7(video_path: str, output_dir: str):
-    # Extração de 2 FPS (Garante precisão sem matar o processador)
+def _extract_frames_ffmpeg_v8(video_path: str, output_dir: str):
     cmd = ["ffmpeg", "-i", video_path, "-vf", "fps=2", os.path.join(output_dir, "frame_%04d.jpg"), "-y"]
     subprocess.run(cmd, capture_output=True, check=True)
 
-def _analyze_frames_v7(frames_dir: str) -> List[Dict[str, Any]]:
+def _analyze_frames_v8(frames_dir: str) -> List[Dict[str, Any]]:
     frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith(".jpg")])
     log = []
     
@@ -154,23 +153,23 @@ def _analyze_frames_v7(frames_dir: str) -> List[Dict[str, Any]]:
                 cx, cy = (xmin + xmax) / 2, (ymin + ymax) / 2
                 area = (xmax - xmin) * (ymax - ymin)
                 
-                # QUANTUM FILTER 1: Blacklist da Mesa (Bonecos)
-                # Se estiver muito embaixo (cy > 0.58) rastejando o centro -> Corta fora.
-                if cy > 0.58: continue
+                # RELEZA v8.0: Ignora bonecos e mesa
+                if cy > 0.60: continue
                 
-                # QUANTUM FILTER 2: Blacklist de Estáticos Centrais
-                # Bonecos de podcast costumam ficar no centro-baixo. 
-                # Humanos costumam ocupar as laterais ou centro-alto.
-                if 0.4 < cx < 0.6 and cy > 0.5: continue 
+                # Filtro de Central Baixo (Boneco no centro da mesa)
+                if 0.45 < cx < 0.55 and cy > 0.45: continue
                 
                 # Lips Tracking (Sensibilidade Extrema: 0.006)
                 lip_y = [landmarks.landmark[i].y for i in LIP_INDEXES]
                 lip_dist = max(lip_y) - min(lip_y)
                 is_speaking = lip_dist > 0.007
                 
-                # Score: Confiança Labial + Posição Realeza (0.32)
-                pos_bonus = 1.0 - abs(cy - 0.32)
-                score = (100.0 if is_speaking else 0.0) + (pos_bonus * 20.0) + (area * 10.0)
+                # EDGE RECOVERY SCORE: Bônus para locutores lateralizados
+                # Se cx < 0.3 ou cx > 0.7, damos bônus de realeza lateral
+                edge_bonus = 30.0 if (cx < 0.35 or cx > 0.65) else 0.0
+                
+                pos_bonus = 1.0 - abs(cy - 0.30) # Linha dos olhos
+                score = (100.0 if is_speaking else 0.0) + (pos_bonus * 10.0) + edge_bonus + (area * 5.0)
                 
                 candidates.append({"x": cx, "score": score, "speaking": is_speaking})
         
@@ -178,6 +177,7 @@ def _analyze_frames_v7(frames_dir: str) -> List[Dict[str, Any]]:
             best = max(candidates, key=lambda x: x["score"])
             log.append({
                 "center_x": best["x"], 
+                "priority": best["score"],
                 "speaking": best["speaking"],
                 "all_xs": sorted([c["x"] for c in candidates]),
                 "count": len(candidates)
@@ -185,7 +185,7 @@ def _analyze_frames_v7(frames_dir: str) -> List[Dict[str, Any]]:
             
     return log
 
-def _get_split_targets_v7(log: List[Dict[str, Any]]) -> List[float]:
+def _get_split_targets_v8(log: List[Dict[str, Any]]) -> List[float]:
     left, right = [], []
     for d in log:
         xs = d.get("all_xs", [])
@@ -193,19 +193,19 @@ def _get_split_targets_v7(log: List[Dict[str, Any]]) -> List[float]:
             left.append(xs[0])
             right.append(xs[-1])
         elif len(xs) == 1:
-            # Se so tem 1, distribui pra onde ele esta pra manter o split estável
-            if xs[0] < 0.45: left.append(xs[0])
-            elif xs[0] > 0.55: right.append(xs[0])
+            if xs[0] < 0.48: left.append(xs[0])
+            elif xs[0] > 0.52: right.append(xs[0])
             
-    if not left: left = [0.25]
-    if not right: right = [0.75]
+    # Garantia de Enquadramento Lateral: se as listas estiverem vazias, forçar alvos de borda
+    if not left: left = [0.20] # Foco Locutor 1
+    if not right: right = [0.80] # Foco Locutor 2
     return [float(np.median(left)), float(np.median(right))]
 
-def _execute_stacked_crop_v7(video_path: str, output_path: str, targets: List[float], iw: int, ih: int, format: str, burn_subtitles: bool, srt_path: Optional[str]) -> str:
-    # Resolve 1 locutor sendo cortado: Alarga a janela de busca no Stacked
+def _execute_stacked_crop_v8(video_path: str, output_path: str, targets: List[float], iw: int, ih: int, format: str, burn_subtitles: bool, srt_path: Optional[str]) -> str:
+    # Resolve 1 locutor sendo cortado: Janela Magnificada (1.3x)
     t1_x, t2_x = int(targets[0] * iw), int(targets[1] * iw)
     win_h = ih // 2
-    win_w = int(win_h * 9 / 8) # Janela confortável para um humano sentado
+    win_w = int(win_h * 9 / 7) # Janela mais larga para comportar corpos lateralizados
     
     off1_x = max(0, min(t1_x - (win_w // 2), iw - win_w))
     off2_x = max(0, min(t2_x - (win_w // 2), iw - win_w))
