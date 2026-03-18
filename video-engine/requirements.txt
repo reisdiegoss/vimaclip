@@ -1,0 +1,30 @@
+# =============================================
+# VimaClip - Motor de Vídeo
+# Dependências Python do microsserviço
+# =============================================
+
+# Framework web assíncrono para criar a API
+fastapi==0.115.6
+
+# Servidor ASGI para rodar o FastAPI
+uvicorn[standard]==0.34.0
+
+# Biblioteca para download de vídeos do YouTube e outras plataformas
+yt-dlp==2026.3.13
+
+# Framework de visão computacional leve do Google (roda na CPU)
+# Será usado futuramente para rastreamento de rostos
+mediapipe==0.10.21
+
+# OpenCV sem interface gráfica (ideal para Docker/servidores)
+# Trabalha em conjunto com o MediaPipe
+opencv-python-headless==4.10.0.84
+
+# Biblioteca HTTP para chamadas à API do Groq (transcrição)
+requests==2.32.3
+
+# Carrega variáveis de ambiente do arquivo .env
+python-dotenv==1.0.1
+
+# Multipart form support para FastAPI
+python-multipart==0.0.19

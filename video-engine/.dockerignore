@@ -1,0 +1,11 @@
+# Arquivos que NÃO devem ser copiados para dentro do container
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.example
+.git
+.gitignore
+temp_videos/
+README.md
+.dockerignore

@@ -1,0 +1,80 @@
+version: "3.8"
+# =============================================
+# VimaClip - Motor de Vídeo
+# Docker Compose para orquestrar o container
+# =============================================
+# Uso (Swarm):
+#   docker-compose build            (buildar a imagem)
+#   docker stack deploy -c docker-compose.yml vimaclip  (deploy no Swarm)
+#   docker stack rm vimaclip        (remover do Swarm)
+#   docker service logs -f vimaclip_video-engine  (ver logs)
+#
+# Uso (desenvolvimento local):
+#   docker-compose up --build       (primeira vez ou após mudanças)
+#   docker-compose up -d            (rodar em background)
+#   docker-compose down             (parar tudo)
+#   docker-compose logs -f          (ver logs em tempo real)
+# =============================================
+
+services:
+  # -----------------------------------------
+  # SERVIÇO: Motor de Vídeo (FastAPI)
+  # Este é o único container do projeto.
+  # Ele roda a API que processa os vídeos.
+  # -----------------------------------------
+  video-engine:
+    # Constrói a imagem a partir do Dockerfile local
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Nome da imagem (necessário para o Swarm usar após o build)
+    image: vimaclip-engine:latest
+
+    # Mapeia a porta 8000 do container para a porta 8000 do host
+    # Isso permite acessar a API em http://localhost:8000
+    ports:
+      - "8000:8000"
+
+    # Volumes: monta pastas do host dentro do container
+    # Isso permite que os vídeos processados fiquem acessíveis fora do Docker
+    volumes:
+      # Volume para vídeos temporários (downloads, cortes, etc.)
+      - ./temp_videos:/app/temp_videos
+      # Volume do código fonte (permite hot-reload durante desenvolvimento)
+      - ./app:/app/app
+
+    # Carrega variáveis de ambiente do arquivo .env
+    env_file:
+      - .env
+
+    # Variáveis de ambiente padrão
+    environment:
+      - PYTHONPATH=/app
+      - TEMP_DIR=/app/temp_videos
+
+    # Conecta o serviço à rede network_public do Swarm
+    # Isso permite comunicação com outros serviços da sua infraestrutura
+    networks:
+      - network_public
+
+    # Configurações de deploy para o Docker Swarm
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+    # Reinicia automaticamente se o container cair (modo compose local)
+    restart: unless-stopped
+
+# =============================================
+# REDES
+# =============================================
+# A rede network_public é externa e já existe no seu Swarm.
+# Ela permite que este serviço se comunique com outros containers.
+# =============================================
+networks:
+  network_public:
+    external: true
